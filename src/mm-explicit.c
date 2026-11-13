@@ -230,7 +230,7 @@ void *mm_malloc(size_t size) {
     if (block != NULL) {
         list_remove(block);
         size_t remaining_size = get_size(block) - size;
-        // The remainder needs room for its own aligned block.
+        // The remainder needs room for a header, two list pointers, and a footer.
         if (remaining_size >= 32) {
             block_t *remainder = (void *) block + size;
             set_header(remainder, remaining_size, false);
@@ -393,12 +393,12 @@ void mm_checkheap(void) {
         assert(size <= (uintptr_t) mem_heap_hi() + 1 - (uintptr_t) block);
         assert(*get_footer(block) == block->header);
 
-        bool free = !is_allocated(block);
-        assert(!(prev_free && free));
-        if (free) {
+        bool curr_free = !is_allocated(block);
+        assert(!(prev_free && curr_free));
+        if (curr_free) {
             ++free_count;
         }
-        prev_free = free;
+        prev_free = curr_free;
         if (block == mm_heap_last) {
             assert((void *) block + size == mem_heap_hi() + 1);
             break;
