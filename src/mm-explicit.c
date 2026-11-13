@@ -110,18 +110,13 @@ static bool is_allocated(block_t *block) {
  */
 
 /** get_footer - Returns a pointer to the block's footer: its last 8 bytes. (Checkpoint 2) */
-__attribute__((unused))
 static size_t *get_footer(block_t *block) {
-    (void) block;
-    // TODO (Checkpoint 2)
-    return NULL;
+    return (void *) block + get_size(block) - sizeof(size_t);
 }
 
 /** set_footer - Copies the block's header into its footer. (Checkpoint 2) */
-__attribute__((unused))
 static void set_footer(block_t *block) {
-    (void) block;
-    // TODO (Checkpoint 2)
+    *get_footer(block) = block->header;
 }
 
 /**
@@ -131,6 +126,7 @@ static void set_footer(block_t *block) {
  */
 static void set_header(block_t *block, size_t size, bool is_allocated) {
     block->header = size | is_allocated;
+    set_footer(block);
 }
 
 /**
@@ -227,13 +223,12 @@ bool mm_init(void) {
  * allocated block. Returns NULL if the heap cannot grow.
  */
 void *mm_malloc(size_t size) {
-    // Leave room for the header and alignment without wrapping around.
-    if (size > SIZE_MAX - sizeof(size_t) - (ALIGNMENT - 1)) {
+    // Leave room for the header, footer, and alignment without wrapping around.
+    if (size > SIZE_MAX - 2 * sizeof(size_t) - (ALIGNMENT - 1)) {
         return NULL;
     }
 
-    // The block must have enough space for a header and be 16-byte aligned
-    size = round_up(sizeof(size_t) + size, ALIGNMENT);
+    size = round_up(2 * sizeof(size_t) + size, ALIGNMENT);
 
     if (size < 32) {
         size = 32;
@@ -320,7 +315,7 @@ void *mm_realloc(void *old_ptr, size_t size) {
     }
 
     block_t *old_block = block_from_payload(old_ptr);
-    size_t copy_size = get_size(old_block) - sizeof(size_t);
+    size_t copy_size = get_size(old_block) - 2 * sizeof(size_t);
     if (size < copy_size) {
         copy_size = size;
     }
