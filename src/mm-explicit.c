@@ -34,6 +34,7 @@
  *     `block_t *b = mem_sbrk(32);` compiles.
  */
 
+#include <assert.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -102,12 +103,6 @@ static size_t get_size(block_t *block) {
 static bool is_allocated(block_t *block) {
     return block->header & 1;
 }
-
-/*
- * Some helpers below are new in Part 2. __attribute__((unused)) stops the
- * compiler from warning that a function is never called. You can remove it
- * once you call the function.
- */
 
 /** get_footer - Returns a pointer to the block's footer: its last 8 bytes. (Checkpoint 2) */
 static size_t *get_footer(block_t *block) {
@@ -179,17 +174,14 @@ static void list_remove(block_t *block) {
  *      `block` in memory, found by reading that block's footer. Returns NULL
  *      if `block` is the first block on the heap. (Checkpoint 3)
  */
-__attribute__((unused))
 static block_t *get_prev_block(block_t *block) {
-    (void) block;
-    // TODO (Checkpoint 3)
-    return NULL;
+    if (block == mm_heap_first) {
+        return NULL;
+    }
+    size_t *prev_footer = (void *) block - sizeof(size_t);
+    size_t prev_size = *prev_footer & ~1;
+    return (void *) block - prev_size;
 }
-
-/*
- * PASTE: your own Part 1 helper functions (if any) go here.
- */
-
 
 /**
  * mm_init - Initializes the allocator state
@@ -283,9 +275,32 @@ void mm_free(void *ptr) {
         return;
     }
 
-    // Mark the block as unallocated
     block_t *block = block_from_payload(ptr);
-    set_header(block, get_size(block), false);
+    size_t size = get_size(block);
+
+    // Remove neighbors before their list pointers become part of the merged payload.
+    if (block != mm_heap_last) {
+        block_t *next = (void *) block + size;
+        if (!is_allocated(next)) {
+            list_remove(next);
+            size += get_size(next);
+            if (next == mm_heap_last) {
+                mm_heap_last = block;
+            }
+        }
+    }
+
+    block_t *prev = get_prev_block(block);
+    if (prev != NULL && !is_allocated(prev)) {
+        list_remove(prev);
+        size += get_size(prev);
+        if (block == mm_heap_last) {
+            mm_heap_last = prev;
+        }
+        block = prev;
+    }
+
+    set_header(block, size, false);
     list_add(block);
 }
 
@@ -361,5 +376,48 @@ void *mm_calloc(size_t nmemb, size_t size) {
  *   - For every block on the free list, block->next->prev == block.
  */
 void mm_checkheap(void) {
+    if (mm_heap_first == NULL) {
+        assert(mm_heap_last == NULL && free_list_head == NULL);
+        return;
+    }
 
+    size_t free_count = 0;
+    block_t *block = mm_heap_first;
+    bool prev_free = false;
+    while (true) {
+        assert((uintptr_t) block >= (uintptr_t) mem_heap_lo());
+        assert((uintptr_t) block + sizeof(size_t) <= (uintptr_t) mem_heap_hi() + 1);
+        size_t size = get_size(block);
+        assert(size >= 32 && size % ALIGNMENT == 0);
+        assert((uintptr_t) block->payload % ALIGNMENT == 0);
+        assert(size <= (uintptr_t) mem_heap_hi() + 1 - (uintptr_t) block);
+        assert(*get_footer(block) == block->header);
+
+        bool free = !is_allocated(block);
+        assert(!(prev_free && free));
+        if (free) {
+            ++free_count;
+        }
+        prev_free = free;
+        if (block == mm_heap_last) {
+            assert((void *) block + size == mem_heap_hi() + 1);
+            break;
+        }
+        block = (void *) block + size;
+    }
+
+    size_t list_count = 0;
+    block_t *prev = NULL;
+    for (block_t *curr = free_list_head; curr != NULL; curr = curr->next) {
+        // A cycle or duplicate entry must exceed the number of free heap blocks.
+        ++list_count;
+        assert(list_count <= free_count);
+        assert((uintptr_t) curr >= (uintptr_t) mm_heap_first);
+        assert((uintptr_t) curr <= (uintptr_t) mm_heap_last);
+        assert((uintptr_t) curr->payload % ALIGNMENT == 0);
+        assert(!is_allocated(curr));
+        assert(curr->prev == prev);
+        prev = curr;
+    }
+    assert(list_count == free_count);
 }
